@@ -8,7 +8,7 @@ from PIL import Image
 import dlib
 
 # Initialize video capture
-video_capture = cv2.VideoCapture(0)  # Use the correct index for the external webcam
+video_capture = cv2.VideoCapture(1)  # Use the correct index for the external webcam
 
 # Check if video capture opened successfully
 if not video_capture.isOpened():
@@ -60,9 +60,13 @@ students = known_face_names.copy()
 
 # Initialize variables for attendance and blinking detection
 attendance_status = {name: "Absent" for name in students}
-blink_threshold = 0.2  # Eye aspect ratio threshold to detect blinking
-consecutive_frames = 3  # Number of frames to check for a blink
-blink_frames = {name: 0 for name in students}  # Counter for blink detection
+blink_threshold = 0.22  # Eye aspect ratio threshold for detecting a blink
+consecutive_frames = 2  # Number of consecutive frames to confirm a blink
+blink_counter = {name: 0 for name in students}  # Track consecutive frames below the threshold
+
+# Initialize motion detection variables
+prev_frame = None
+motion_threshold = 5000  # Threshold to determine if significant motion is detected
 
 # Define the current date and time at the start of the recognition
 now = datetime.now()
@@ -79,6 +83,19 @@ while True:
     small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
     rgb_small_frame = np.ascontiguousarray(small_frame[:, :, ::-1])
 
+    # Convert frame to grayscale for motion detection
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if prev_frame is not None:
+        # Compute the absolute difference between the current frame and previous frame
+        frame_diff = cv2.absdiff(prev_frame, gray_frame)
+        # Compute the sum of the absolute differences
+        motion_score = np.sum(frame_diff)
+        # Check if motion is detected
+        if motion_score < motion_threshold:
+            print("No significant motion detected. Skipping frame.")
+            prev_frame = gray_frame
+            continue
+
     # Detect face locations and encodings in the frame
     face_locations = face_recognition.face_locations(rgb_small_frame)
     face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
@@ -89,36 +106,39 @@ while True:
         face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
         best_match_index = np.argmin(face_distances)
 
-        if face_distances[best_match_index] < 0.6:
+        if face_distances[best_match_index] < 0.6:  # Confidence threshold
             name = known_face_names[best_match_index]
             face_names.append(name)
 
-            # Mark the student as present if the face is recognized
-            if name in students:
-                # Perform eye detection using dlib
-                gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                rects = detector(gray_frame, 0)
+            # Check for eye blinks using dlib
+            rects = detector(gray_frame, 0)
 
-                for rect in rects:
-                    shape = predictor(gray_frame, rect)
-                    shape = np.array([[p.x, p.y] for p in shape.parts()])
-                    left_eye = shape[36:42]
-                    right_eye = shape[42:48]
-                    left_ear = eye_aspect_ratio(left_eye)
-                    right_ear = eye_aspect_ratio(right_eye)
+            for rect in rects:
+                shape = predictor(gray_frame, rect)
+                shape = np.array([[p.x, p.y] for p in shape.parts()])
+                left_eye = shape[36:42]
+                right_eye = shape[42:48]
+                left_ear = eye_aspect_ratio(left_eye)
+                right_ear = eye_aspect_ratio(right_eye)
+                avg_ear = (left_ear + right_ear) / 2.0
 
-                    # Check if eyes are closed to detect a blink
-                    if left_ear < blink_threshold and right_ear < blink_threshold:
-                        blink_frames[name] += 1  # Increment blink counter
-                    else:
-                        blink_frames[name] = 0  # Reset blink counter
+                # Print EAR values for debugging
+                print(f"{name}: Left EAR: {left_ear:.2f}, Right EAR: {right_ear:.2f}, Avg EAR: {avg_ear:.2f}")
 
-                    # Mark the student as present if blink is detected
-                    if blink_frames[name] >= consecutive_frames:
+                # Check if a blink is detected
+                if avg_ear < blink_threshold:
+                    blink_counter[name] += 1
+                else:
+                    blink_counter[name] = 0
+
+                # Confirm a blink if the counter exceeds the threshold
+                if blink_counter[name] >= consecutive_frames:
+                    # Mark the student as present if they blink
+                    if name in students:
                         students.remove(name)
                         attendance_status[name] = "Present"
-                        print(f"{name} marked present after blink detection")
-                        break  # Exit loop once blink is detected and marked as present
+                        print(f"{name} marked present with blink detected")
+                    blink_counter[name] = 0  # Reset the blink counter after marking present
 
             # Draw a rectangle around the face
             top, right, bottom, left = face_location
@@ -126,7 +146,7 @@ while True:
             right *= 4
             bottom *= 4
             left *= 4
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+            cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
 
         else:
             face_names.append("Unknown")
@@ -137,6 +157,8 @@ while True:
 
     if cv2.waitKey(1) & 0xFF == ord('q') or not students:
         break
+
+    prev_frame = gray_frame
 
 # Write attendance status to the CSV file
 with open(f'{current_date}_attendance.csv', 'w+', newline='') as f:

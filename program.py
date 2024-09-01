@@ -68,6 +68,10 @@ blink_counter = {name: 0 for name in students}  # Track consecutive frames below
 now = datetime.now()
 current_date = now.strftime("%Y-%m-%d")
 
+# Initialize the motion detection variables
+prev_frame = None
+motion_threshold = 5000  # Threshold to determine if significant motion is detected
+
 # Video capture and face recognition loop
 while True:
     ret, frame = video_capture.read()
@@ -85,16 +89,28 @@ while True:
 
     face_names = []
 
+    # Convert frame to grayscale for motion detection
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    if prev_frame is not None:
+        # Compute the absolute difference between the current frame and previous frame
+        frame_diff = cv2.absdiff(prev_frame, gray_frame)
+        # Compute the sum of the absolute differences
+        motion_score = np.sum(frame_diff)
+        # Check if motion is detected
+        if motion_score < motion_threshold:
+            print("No significant motion detected. Skipping frame.")
+            prev_frame = gray_frame
+            continue
+
     for face_encoding, face_location in zip(face_encodings, face_locations):
         face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
         best_match_index = np.argmin(face_distances)
 
-        if face_distances[best_match_index] < 0.6:
+        if face_distances[best_match_index] < 0.6:  # Confidence threshold
             name = known_face_names[best_match_index]
             face_names.append(name)
 
             # Check for eye blinks using dlib
-            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             rects = detector(gray_frame, 0)
 
             for rect in rects:
@@ -104,7 +120,7 @@ while True:
                 right_eye = shape[42:48]
                 left_ear = eye_aspect_ratio(left_eye)
                 right_ear = eye_aspect_ratio(right_eye)
-                avg_ear = (left_ear + right_ear) / 3.0
+                avg_ear = (left_ear + right_ear) / 2.0
 
                 # Print EAR values for debugging
                 print(f"{name}: Left EAR: {left_ear:.2f}, Right EAR: {right_ear:.2f}, Avg EAR: {avg_ear:.2f}")
@@ -141,6 +157,8 @@ while True:
 
     if cv2.waitKey(1) & 0xFF == ord('q') or not students:
         break
+
+    prev_frame = gray_frame
 
 # Write attendance status to the CSV file
 with open(f'{current_date}_attendance.csv', 'w+', newline='') as f:
