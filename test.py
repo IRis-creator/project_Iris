@@ -3,12 +3,12 @@ import cv2
 import numpy as np
 import csv
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from PIL import Image
 import dlib
 
 # Initialize video capture
-video_capture = cv2.VideoCapture(1)  # Use the correct index for the external webcam
+video_capture = cv2.VideoCapture(0)  # Use the correct index for the external webcam
 
 # Check if video capture opened successfully
 if not video_capture.isOpened():
@@ -64,13 +64,48 @@ blink_threshold = 0.22  # Eye aspect ratio threshold for detecting a blink
 consecutive_frames = 2  # Number of consecutive frames to confirm a blink
 blink_counter = {name: 0 for name in students}  # Track consecutive frames below the threshold
 
-# Initialize motion detection variables
+# Time tracking for 2-minute period and 15-second cutoff
+start_time = datetime.now()
+cutoff_time = start_time + timedelta(seconds=15)
+class_end_time = start_time + timedelta(minutes=2)
+
+# Initialize the motion detection variables
 prev_frame = None
 motion_threshold = 5000  # Threshold to determine if significant motion is detected
 
-# Define the current date and time at the start of the recognition
-now = datetime.now()
-current_date = now.strftime("%Y-%m-%d")
+# Path for attendance CSV file
+current_date = start_time.strftime("%Y-%m-%d")
+attendance_file = f'{current_date}_attendance.csv'
+
+# Function to send a message to absent students
+def send_absent_message(name):
+    # This is a placeholder function for sending a message.
+    # You can replace this with actual messaging code (SMS, email, etc.)
+    print(f"Sending message: 'Why are you absent?' to {name}")
+
+# Function to check attendance for a specific student
+def check_student_attendance(student_name):
+    present_days = 0
+    absent_days = 0
+    late_days = 0
+
+    for csv_file in os.listdir('.'):  # Assuming all attendance files are in the current directory
+        if csv_file.endswith('.csv') and csv_file.startswith('attendance'):
+            with open(csv_file, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row['Name'] == student_name:
+                        if row['Status'] == "Present":
+                            present_days += 1
+                        elif row['Status'] == "Absent":
+                            absent_days += 1
+                        elif row['Status'] == "Late Present":
+                            late_days += 1
+
+    print(f"{student_name}'s Attendance:")
+    print(f"Present: {present_days} days")
+    print(f"Absent: {absent_days} days")
+    print(f"Late Present: {late_days} days")
 
 # Video capture and face recognition loop
 while True:
@@ -82,6 +117,12 @@ while True:
     # Resize the frame for faster processing and convert to RGB
     small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
     rgb_small_frame = np.ascontiguousarray(small_frame[:, :, ::-1])
+
+    # Detect face locations and encodings in the frame
+    face_locations = face_recognition.face_locations(rgb_small_frame)
+    face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+
+    face_names = []
 
     # Convert frame to grayscale for motion detection
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -96,11 +137,7 @@ while True:
             prev_frame = gray_frame
             continue
 
-    # Detect face locations and encodings in the frame
-    face_locations = face_recognition.face_locations(rgb_small_frame)
-    face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
-
-    face_names = []
+    current_time = datetime.now()
 
     for face_encoding, face_location in zip(face_encodings, face_locations):
         face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
@@ -109,6 +146,11 @@ while True:
         if face_distances[best_match_index] < 0.6:  # Confidence threshold
             name = known_face_names[best_match_index]
             face_names.append(name)
+
+            # Check if the student is already marked
+            if attendance_status[name] != "Absent":
+                print(f"{name} is already marked as {attendance_status[name]}. Skipping further checks.")
+                continue  # Skip if the student is already marked as present or late present
 
             # Check for eye blinks using dlib
             rects = detector(gray_frame, 0)
@@ -120,7 +162,7 @@ while True:
                 right_eye = shape[42:48]
                 left_ear = eye_aspect_ratio(left_eye)
                 right_ear = eye_aspect_ratio(right_eye)
-                avg_ear = (left_ear + right_ear) / 2.0
+                avg_ear = (left_ear + right_ear)/2.5
 
                 # Print EAR values for debugging
                 print(f"{name}: Left EAR: {left_ear:.2f}, Right EAR: {right_ear:.2f}, Avg EAR: {avg_ear:.2f}")
@@ -133,12 +175,14 @@ while True:
 
                 # Confirm a blink if the counter exceeds the threshold
                 if blink_counter[name] >= consecutive_frames:
-                    # Mark the student as present if they blink
-                    if name in students:
-                        students.remove(name)
+                    if current_time <= cutoff_time:
                         attendance_status[name] = "Present"
-                        print(f"{name} marked present with blink detected")
-                    blink_counter[name] = 0  # Reset the blink counter after marking present
+                    elif current_time <= class_end_time:
+                        attendance_status[name] = "Late Present"
+                    else:
+                        attendance_status[name] = "Absent"
+                    print(f"{name} marked as {attendance_status[name]}")
+                    blink_counter[name] = 0  # Reset the blink counter
 
             # Draw a rectangle around the face
             top, right, bottom, left = face_location
@@ -155,18 +199,31 @@ while True:
     # Display the frame
     cv2.imshow("Attendance System", frame)
 
-    if cv2.waitKey(1) & 0xFF == ord('q') or not students:
+    # Check if class period is over
+    if current_time > class_end_time or cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
     prev_frame = gray_frame
 
+# Mark absent students and send messages
+for name, status in attendance_status.items():
+    if status == "Absent":
+        send_absent_message(name)
+
 # Write attendance status to the CSV file
-with open(f'{current_date}_attendance.csv', 'w+', newline='') as f:
+with open(attendance_file, 'a+', newline='') as f:
     lnwriter = csv.writer(f)
-    lnwriter.writerow(["Name", "Date", "Time", "Status"])
+    f.seek(0)
+    if f.read(100) == '':  # Write header if the file is empty
+        lnwriter.writerow(["Name", "Date", "Time", "Status"])
+
     for name, status in attendance_status.items():
-        lnwriter.writerow([name, current_date, now.strftime("%H:%M:%S"), status])
+        lnwriter.writerow([name, current_date, start_time.strftime("%H:%M:%S"), status])
 
 video_capture.release()
 cv2.destroyAllWindows()
 print("Attendance process complete. Camera closed.")
+
+# After attendance collection, query the student's attendance
+student_name = input("Enter the name of the student to check attendance: ")
+check_student_attendance(student_name)
