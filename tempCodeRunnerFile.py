@@ -71,7 +71,6 @@ class_end_time = start_time + timedelta(minutes=2)
 
 # Get the current day of the week (e.g., "Monday", "Tuesday")
 current_day_of_week = start_time.strftime('%A')
-current_date = start_time.strftime("%Y-%m-%d")
 
 # Initialize total attendance dictionary
 total_attendance = {name: {"Present": 0, "Late Present": 0, "Absent": 0, "Daily Attendance": {}} for name in students}
@@ -170,31 +169,33 @@ for name, status in attendance_status.items():
     if status == "Absent":
         send_absent_message(name)
 
-# Update daily attendance and total attendance based on today's data
-for name, status in attendance_status.items():
-    # Check if today is already recorded in total attendance
-    if current_day_of_week in total_attendance[name]["Daily Attendance"]:
-        # Adjust the totals based on status change
-        if status == "Present" and total_attendance[name]["Daily Attendance"][current_day_of_week] == "Absent":
-            total_attendance[name]["Present"] += 1
-            total_attendance[name]["Absent"] -= 1
-        elif status == "Late Present" and total_attendance[name]["Daily Attendance"][current_day_of_week] == "Absent":
-            total_attendance[name]["Late Present"] += 1
-            total_attendance[name]["Absent"] -= 1
-    else:
-        # First time attendance for the day, set initial values
+# Write daily attendance status to the CSV file
+current_date = start_time.strftime("%Y-%m-%d")
+with open(f'{current_date}_attendance.csv', 'w+', newline='') as f:
+    lnwriter = csv.writer(f)
+    lnwriter.writerow(["Name", "Date", "Time", "Status", "Day of the Week"])
+    for name, status in attendance_status.items():
+        lnwriter.writerow([name, current_date, start_time.strftime("%H:%M:%S"), status, current_day_of_week])
+
+        # Update total attendance based on today's attendance
         if status == "Present":
             total_attendance[name]["Present"] += 1
         elif status == "Late Present":
             total_attendance[name]["Late Present"] += 1
-        total_attendance[name]["Daily Attendance"][current_day_of_week] = status
+        elif status == "Absent":
+            total_attendance[name]["Absent"] += 1
+
+        # Update daily attendance count
+        if current_day_of_week not in total_attendance[name]["Daily Attendance"]:
+            total_attendance[name]["Daily Attendance"][current_day_of_week] = 0
+        total_attendance[name]["Daily Attendance"][current_day_of_week] += 1
 
 # Write total attendance summary to a CSV file (overwrites the previous file with updated totals)
 with open('total_attendance_summary.csv', 'w+', newline='') as f:
     lnwriter = csv.writer(f)
-    lnwriter.writerow(["Name", "Total Present Days", "Total Late Present Days", "Total Absent Days", "Daily Attendance"])
+    lnwriter.writerow(["Name", "Total Present Days", "Total Late Present Days", "Total Absent Days"])
     for name, counts in total_attendance.items():
-        lnwriter.writerow([name, counts["Present"], counts["Late Present"], counts["Absent"], counts["Daily Attendance"]])
+        lnwriter.writerow([name, counts["Present"], counts["Late Present"], counts["Absent"]])
 
 video_capture.release()
 cv2.destroyAllWindows()

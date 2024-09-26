@@ -73,39 +73,11 @@ class_end_time = start_time + timedelta(minutes=2)
 prev_frame = None
 motion_threshold = 5000  # Threshold to determine if significant motion is detected
 
-# Path for attendance CSV file
-current_date = start_time.strftime("%Y-%m-%d")
-attendance_file = f'{current_date}_attendance.csv'
-
 # Function to send a message to absent students
 def send_absent_message(name):
     # This is a placeholder function for sending a message.
     # You can replace this with actual messaging code (SMS, email, etc.)
     print(f"Sending message: 'Why are you absent?' to {name}")
-
-# Function to check attendance for a specific student
-def check_student_attendance(student_name):
-    present_days = 0
-    absent_days = 0
-    late_days = 0
-
-    for csv_file in os.listdir('.'):  # Assuming all attendance files are in the current directory
-        if csv_file.endswith('.csv') and csv_file.startswith('attendance'):
-            with open(csv_file, 'r') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if row['Name'] == student_name:
-                        if row['Status'] == "Present":
-                            present_days += 1
-                        elif row['Status'] == "Absent":
-                            absent_days += 1
-                        elif row['Status'] == "Late Present":
-                            late_days += 1
-
-    print(f"{student_name}'s Attendance:")
-    print(f"Present: {present_days} days")
-    print(f"Absent: {absent_days} days")
-    print(f"Late Present: {late_days} days")
 
 # Video capture and face recognition loop
 while True:
@@ -210,20 +182,15 @@ for name, status in attendance_status.items():
     if status == "Absent":
         send_absent_message(name)
 
-# Write attendance status to the CSV file
-with open(attendance_file, 'a+', newline='') as f:
-    lnwriter = csv.writer(f)
-    f.seek(0)
-    if f.read(100) == '':  # Write header if the file is empty
-        lnwriter.writerow(["Name", "Date", "Time", "Status"])
 
+# Write attendance status to the CSV file
+current_date = start_time.strftime("%Y-%m-%d")
+with open(f'{current_date}_attendance.csv', 'w+', newline='') as f:
+    lnwriter = csv.writer(f)
+    lnwriter.writerow(["Name", "Date", "Time", "Status"])
     for name, status in attendance_status.items():
         lnwriter.writerow([name, current_date, start_time.strftime("%H:%M:%S"), status])
 
 video_capture.release()
 cv2.destroyAllWindows()
 print("Attendance process complete. Camera closed.")
-
-# After attendance collection, query the student's attendance
-student_name = input("Enter the name of the student to check attendance: ")
-check_student_attendance(student_name)
